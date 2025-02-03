@@ -10,9 +10,9 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.11.2
 #   kernelspec:
-#     display_name: venv
+#     display_name: .venv
 #     language: python
-#     name: venv
+#     name: python3
 # ---
 
 # %% [markdown]
@@ -199,7 +199,10 @@ for _ in range(n_trials):
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": "Convert the following into a JSON format:"},
+                {
+                    "role": "system",
+                    "content": "Convert the following into a JSON format:",
+                },
                 {"role": "user", "content": planets_txt},
             ],
             response_format={"type": "json_object"},
@@ -610,7 +613,9 @@ Text: {context}
 """
 
 # Simple list of choices
-generator = outlines.generate.choice(outlines_model, ["Jupiter", "Saturn", "Uranus", "Neptune"])
+generator = outlines.generate.choice(
+    outlines_model, ["Jupiter", "Saturn", "Uranus", "Neptune"]
+)
 answer = generator(prompt)
 print(f"List-based choice: {answer}")
 
@@ -675,7 +680,7 @@ class SurfaceType(str, Enum):
 
 
 class Atmosphere(BaseModel):
-    type_: AtmosphereType
+    type: AtmosphereType
     main_component: str
     has_clouds: bool
     pressure_bars: float
@@ -683,7 +688,7 @@ class Atmosphere(BaseModel):
 
 class CelestialObject(BaseModel):
     name: str
-    type_: CelestialBody  # Using our previously defined CelestialBody enum
+    type: CelestialBody  # Using our previously defined CelestialBody enum
     diameter_km: float
     surface: SurfaceType
     atmosphere: Atmosphere | None
@@ -707,6 +712,7 @@ Text: {context}
 
 celestial_object = generator(prompt)
 print(repr(celestial_object))
+
 
 # %% [markdown]
 # ### Exercise 5
@@ -753,9 +759,31 @@ print(repr(celestial_object))
 # - Character/Species description
 # - Scientific observation recording
 
+
+# %%
+class MyModel(BaseModel): ...
+
+
+# Create a generator for this complex structure
+
+generator = outlines.generate.json(outlines_model, MyModel)
+
+context = """
+...
+"""
+
+prompt = f"""
+Based on the following text, convert the information into a structured format:
+
+Text: {context}
+"""
+
+my_model = generator(prompt)
+print(repr(my_model))
+
 # %% [markdown]
 # ## 6. Adding Data Validation for LLM Outputs
-# 
+#
 # One key challenge when working with LLMs is that they can:
 # 1. Generate physically impossible values
 # 2. Make mathematical errors
@@ -796,6 +824,7 @@ client = OpenAI(
 
 MODEL_NAME = "gpt-4o-mini"
 
+
 # First, let's see what the LLM generates without validation
 class Star(BaseModel):
     name: str
@@ -803,6 +832,7 @@ class Star(BaseModel):
     mass_solar: float
     radius_km: float
     type: str
+
 
 response = client.beta.chat.completions.parse(
     model=MODEL_NAME,
@@ -824,27 +854,35 @@ print(response.choices[0].message.content)
 
 from pydantic import ValidationError, field_validator, model_validator, ValidationInfo
 
+
 class ValidatedStar(BaseModel):
     name: str
     distance_ly: float
     mass_solar: float
     radius_km: float
     type: str
-    
-    @field_validator('distance_ly', 'mass_solar', 'radius_km')
+
+    @field_validator("distance_ly", "mass_solar", "radius_km")
     @classmethod
     def must_be_positive(cls, value: float, info: ValidationInfo) -> float:
         if value <= 0:
-            raise ValueError(f'{info.field_name} must be positive')
+            raise ValueError(f"{info.field_name} must be positive")
         return value
-    
-    @field_validator('type')
+
+    @field_validator("type")
     @classmethod
     def validate_star_type(cls, value: str) -> str:
-        valid_types = {'red dwarf', 'red giant', 'neutron star', 'white dwarf', 'main sequence'}
+        valid_types = {
+            "red dwarf",
+            "red giant",
+            "neutron star",
+            "white dwarf",
+            "main sequence",
+        }
         if value.lower() not in valid_types:
-            raise ValueError(f'Invalid star type. Must be one of: {valid_types}')
+            raise ValueError(f"Invalid star type. Must be one of: {valid_types}")
         return value.lower()
+
 
 try:
     response = client.beta.chat.completions.parse(
@@ -867,51 +905,54 @@ except ValidationError as e:
 
 from typing import Self
 
+
 class Planet(BaseModel):
     name: str
     mass_kg: float
     orbital_period_days: float
     perihelion_km: float
     aphelion_km: float
-    
-    @field_validator('mass_kg', 'orbital_period_days', 'perihelion_km', 'aphelion_km')
+
+    @field_validator("mass_kg", "orbital_period_days", "perihelion_km", "aphelion_km")
     @classmethod
     def must_be_positive(cls, value: float, info: ValidationInfo) -> float:
         if value <= 0:
-            raise ValueError(f'{info.field_name} must be positive')
+            raise ValueError(f"{info.field_name} must be positive")
         return value
-    
-    @model_validator(mode='after')
+
+    @model_validator(mode="after")
     def check_orbit(self) -> Self:
         if self.perihelion_km >= self.aphelion_km:
             raise ValueError(
-                f'Perihelion ({self.perihelion_km:e} km) must be less than '
-                f'aphelion ({self.aphelion_km:e} km)'
+                f"Perihelion ({self.perihelion_km:e} km) must be less than "
+                f"aphelion ({self.aphelion_km:e} km)"
             )
         return self
+
 
 class PlanetarySystem(BaseModel):
     star_name: str
     star_mass_kg: float
     planets: list[Planet]
-    
-    @model_validator(mode='after')
+
+    @model_validator(mode="after")
     def validate_masses(self) -> Self:
         for planet in self.planets:
             if planet.mass_kg >= self.star_mass_kg:
                 raise ValueError(
-                    f'Planet {planet.name} has mass {planet.mass_kg:e} kg, which is '
-                    f'greater than or equal to its star ({self.star_mass_kg:e} kg)'
+                    f"Planet {planet.name} has mass {planet.mass_kg:e} kg, which is "
+                    f"greater than or equal to its star ({self.star_mass_kg:e} kg)"
                 )
         return self
+
 
 try:
     response = client.beta.chat.completions.parse(
         model=MODEL_NAME,
         messages=[
             {
-                "role": "system", 
-                "content": "Convert this planetary system description into structured data:"
+                "role": "system",
+                "content": "Convert this planetary system description into structured data:",
             },
             {"role": "user", "content": impossible_planetary_system},
         ],
@@ -945,36 +986,41 @@ BH-123 is a unique black hole with:
 G = 6.674e-11  # gravitational constant
 c = 3e8  # speed of light
 
+
 class BlackHole(BaseModel):
     name: str
     mass_kg: float
     event_horizon_radius_km: float
     singularity_distance_km: float | None = None
     hawking_temperature_k: float | None = None
-    
-    @model_validator(mode='after')
+
+    @model_validator(mode="after")
     def validate_physics(self) -> Self:
         if self.mass_kg <= 0:
-            raise ValueError('Black hole mass must be positive')
-        
+            raise ValueError("Black hole mass must be positive")
+
         # Calculate expected radius (rough approximation)
         expected_radius_m = 2 * G * self.mass_kg / (c * c)
         expected_radius_km = expected_radius_m / 1000
-        
+
         # Allow 10% margin for error
-        if abs(self.event_horizon_radius_km - expected_radius_km) / expected_radius_km > 0.1:
+        if (
+            abs(self.event_horizon_radius_km - expected_radius_km) / expected_radius_km
+            > 0.1
+        ):
             raise ValueError(
-                f'Event horizon radius {self.event_horizon_radius_km} km differs '
-                f'from expected {expected_radius_km:.2f} km'
+                f"Event horizon radius {self.event_horizon_radius_km} km differs "
+                f"from expected {expected_radius_km:.2f} km"
             )
-        
+
         if self.singularity_distance_km is not None:
             if self.singularity_distance_km <= 0:
-                raise ValueError('Singularity distance must be positive')
+                raise ValueError("Singularity distance must be positive")
             if self.singularity_distance_km >= self.event_horizon_radius_km:
-                raise ValueError('Singularity must be inside event horizon')
-        
+                raise ValueError("Singularity must be inside event horizon")
+
         return self
+
 
 try:
     response = client.beta.chat.completions.parse(
@@ -994,7 +1040,7 @@ except ValidationError as e:
 
 # %% [markdown]
 # ### Exercise 4.2: Testing with Valid Data
-# 
+#
 # Now that we've seen how our validators catch impossible values, let's try them with
 # physically possible data. Create your own `possible_black_hole` text with realistic values.
 #
@@ -1029,3 +1075,88 @@ except ValidationError as e:
     print("Validation failed:")
     print(e)
 
+# %% [markdown]
+# ## 8. Image Classification with Vision Models
+# Just like text models, LLMs can also understand images! Let's explore using a vision model
+# to describe the content of pictures.
+
+# %%
+client = OpenAI(
+    base_url="https://api.groq.com/openai/v1", api_key=os.getenv("GROQ_API_KEY")
+)
+
+
+def analyze_image(image_url: str) -> str:
+    completion = client.chat.completions.create(
+        model="llama-3.2-11b-vision-preview",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What's in this image?"},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            }
+        ],
+    )
+    return completion.choices[0].message.content
+
+
+# Test with some public images
+test_images = [
+    "https://upload.wikimedia.org/wikipedia/commons/f/f2/LPU-v1-die.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/2/2f/Hubble_ultra_deep_field.jpg",
+    "https://en.wikipedia.org/wiki/Andromeda_Galaxy#/media/File:M31_09-01-2011_(cropped).jpg",
+]
+
+print("Raw model outputs:")
+for url in test_images:
+    print(f"\nAnalyzing {url}")
+    print(analyze_image(url))
+
+# %% [markdown]
+# As we can see, the model generates natural language descriptions. Let's make this more
+# structured using JSON output like we did before.
+
+# %%
+from pydantic import BaseModel
+
+
+class ImageContent(BaseModel):
+    # some ideas for structured output, feel free to modify
+    main_subject: str
+    category: str
+    description: str
+
+
+response = client.chat.completions.parse(
+    model="llama-3.2-11b-vision-preview",
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "What's in this image? Provide a structured description.",
+                },
+                {"type": "image_url", "image_url": {"url": test_images[0]}},
+            ],
+        }
+    ],
+    response_format=ImageContent,
+)
+
+print("\nStructured output:")
+print(response.choices[0].message.content)
+
+# %% [markdown]
+# ### Exercise 6
+# Try running the structured image analysis on different types of images.
+# How well does the model handle:
+# - Close-up vs distant objects
+# - Technical vs natural scenes
+# - Simple vs complex compositions
+#
+
+# %% [markdown]
+#
