@@ -1,0 +1,8 @@
+langchain
+ollama
+openai
+outlines
+pydantic
+python-dotenv
+torch
+transformers
