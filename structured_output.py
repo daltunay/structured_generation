@@ -131,16 +131,6 @@ print(f"Is valid JSON? {is_json(response_content)}")
 
 # %%
 def test_prompt_reliability(prompt: str, n_trials: int = 10) -> float:
-    """
-    Test how reliable a prompt is at generating valid JSON.
-
-    Args:
-        prompt: The system prompt to test
-        n_trials: Number of attempts to make
-
-    Returns:
-        Success rate (0.0 to 1.0)
-    """
     success = 0
 
     for _ in range(n_trials):
@@ -167,15 +157,15 @@ def test_prompt_reliability(prompt: str, n_trials: int = 10) -> float:
 #
 # What success rates do you get? Why do you think some prompts work better than others?
 #
-# Example usage:
-# ```python
-# basic_prompt = "Convert the following into JSON format"
-# success_total = test_prompt_reliability(basic_prompt)
-# print(success_total)
-# ```
-#
 # ⚠️ Note: You might notice that even with your best prompt, getting consistent results is challenging.
 # This will lead us to explore more reliable techniques in the next sections!
+
+# %%
+MY_PROMPT = "..."  # Fill in your prompt here
+N_TRIALS = 10
+
+success = test_prompt_reliability(MY_PROMPT, N_TRIALS)
+print(f"Success rate: {success} / {N_TRIALS}")
 
 # %% [markdown]
 # ## 3. Using Built-in JSON Response Format
@@ -755,6 +745,8 @@ print(repr(celestial_object))
 # - Use enums for reusable, type-safe choices
 # - Use nested models for complex, structured data
 #
+# Find some unstructured data online for this. You can use the `get_text` function defined at the beginning of this notebook.
+#
 # Some ideas:
 # - Astronomical object classification
 # - Weather report structuring
@@ -769,3 +761,246 @@ print(repr(celestial_object))
 # 3. Using Pydantic for type-safe parsing
 # 4. Understanding and controlling token generation
 # 5. Using specialized libraries for structured generation
+#
+# **Next Steps:**
+# - Try combining different techniques
+# - Experiment with other data structures
+# - Test with different models and providers
+#
+#
+# %% [markdown]
+# ## 6. Adding Data Validation for LLM Outputs
+# 
+# When working with LLMs, their outputs can be unreliable. Let's look at some examples
+# and how to validate them.
+
+# %%
+# First, let's create some questionable astronomical texts for the LLM to process
+questionable_star_text = """
+Alpha Centauri is a remarkable star system located -4.37 light years from Earth.
+The main star has a negative mass of -2.1 solar masses and a radius of 0 kilometers.
+Scientists believe it might be both a neutron star and a red giant simultaneously.
+"""
+
+impossible_planetary_system = """
+The Kepler-X system contains a small star with mass 1e28 kg.
+It has three planets:
+1. Super-Jupiter: A massive planet with mass 1e29 kg (10 times more than its star!)
+2. Speedy: Completes an orbit in -2 days at a distance of 1e8 km
+3. Paradox: Has a closest approach (perihelion) of 2e8 km but furthest point (aphelion) of 1e8 km
+"""
+
+# %%
+# Set up our client
+client = OpenAI(
+    base_url="https://api.openai.com/v1", api_key=os.getenv("OPENAI_API_KEY")
+)
+
+MODEL_NAME = "gpt-4o-mini"
+
+# First, let's see what the LLM generates without validation
+class Star(BaseModel):
+    name: str
+    distance_ly: float
+    mass_solar: float
+    radius_km: float
+    type: str
+
+response = client.beta.chat.completions.parse(
+    model=MODEL_NAME,
+    messages=[
+        {
+            "role": "system",
+            "content": "Convert the following star description into structured data:",
+        },
+        {"role": "user", "content": questionable_star_text},
+    ],
+    response_format=Star,
+)
+
+print("Without validation:")
+print(response.choices[0].message.content)
+
+# %%
+# Now let's add validators
+
+from pydantic import ValidationError, field_validator, model_validator, ValidationInfo
+
+class ValidatedStar(BaseModel):
+    name: str
+    distance_ly: float
+    mass_solar: float
+    radius_km: float
+    type: str
+    
+    @field_validator('distance_ly', 'mass_solar', 'radius_km')
+    @classmethod
+    def must_be_positive(cls, value: float, info: ValidationInfo) -> float:
+        if value <= 0:
+            raise ValueError(f'{info.field_name} must be positive')
+        return value
+    
+    @field_validator('type')
+    @classmethod
+    def validate_star_type(cls, value: str) -> str:
+        valid_types = {'red dwarf', 'red giant', 'neutron star', 'white dwarf', 'main sequence'}
+        if value.lower() not in valid_types:
+            raise ValueError(f'Invalid star type. Must be one of: {valid_types}')
+        return value.lower()
+
+try:
+    response = client.beta.chat.completions.parse(
+        model=MODEL_NAME,
+        messages=[
+            {
+                "role": "system",
+                "content": "Convert the following star description into structured data:",
+            },
+            {"role": "user", "content": questionable_star_text},
+        ],
+        response_format=ValidatedStar,
+    )
+except ValidationError as e:
+    print("\nWith validation:")
+    print(e)
+
+# %%
+# Now let's validate a planetary system
+
+from typing import Self
+
+class Planet(BaseModel):
+    name: str
+    mass_kg: float
+    orbital_period_days: float
+    perihelion_km: float
+    aphelion_km: float
+    
+    @field_validator('mass_kg', 'orbital_period_days', 'perihelion_km', 'aphelion_km')
+    @classmethod
+    def must_be_positive(cls, value: float, info: ValidationInfo) -> float:
+        if value <= 0:
+            raise ValueError(f'{info.field_name} must be positive')
+        return value
+    
+    @model_validator(mode='after')
+    def check_orbit(self) -> Self:
+        if self.perihelion_km >= self.aphelion_km:
+            raise ValueError(
+                f'Perihelion ({self.perihelion_km:e} km) must be less than '
+                f'aphelion ({self.aphelion_km:e} km)'
+            )
+        return self
+
+class PlanetarySystem(BaseModel):
+    star_name: str
+    star_mass_kg: float
+    planets: list[Planet]
+    
+    @model_validator(mode='after')
+    def validate_masses(self) -> Self:
+        for planet in self.planets:
+            if planet.mass_kg >= self.star_mass_kg:
+                raise ValueError(
+                    f'Planet {planet.name} has mass {planet.mass_kg:e} kg, which is '
+                    f'greater than or equal to its star ({self.star_mass_kg:e} kg)'
+                )
+        return self
+
+try:
+    response = client.beta.chat.completions.parse(
+        model=MODEL_NAME,
+        messages=[
+            {
+                "role": "system", 
+                "content": "Convert this planetary system description into structured data:"
+            },
+            {"role": "user", "content": impossible_planetary_system},
+        ],
+        response_format=PlanetarySystem,
+    )
+except ValidationError as e:
+    print("\nPlanetary system validation errors:")
+    print(e)
+
+# %% [markdown]
+# ### Exercise 4.1: Black Hole Validator
+# Create a validator for black hole data. The LLM might generate physically impossible values.
+# Key physics to check:
+# - Event horizon radius (R) = 2GM/c² (G = gravitational constant, M = mass, c = speed of light)
+# - Hawking radiation temperature ∝ 1/M
+# - Singularity must be within event horizon
+#
+# Here's some intentionally problematic text to test with:
+
+# %%
+impossible_black_hole = """
+BH-123 is a unique black hole with:
+- Mass: -5e30 kg (negative mass!)
+- Event horizon: 100 km (too large for its mass)
+- Singularity distance: 200 km (outside event horizon!)
+- Hawking temperature: -290 K (negative temperature!)
+"""
+
+# Your solution here:
+from typing import Optional
+
+class BlackHole(BaseModel):
+    name: str
+    mass_kg: float
+    event_horizon_radius_km: float
+    singularity_distance_km: Optional[float] = None
+    hawking_temperature_k: Optional[float] = None
+    
+    # Add your validators here
+    @field_validator('mass_kg')
+    @classmethod
+    def validate_mass(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError('Black hole mass must be positive')
+        return v
+    
+    @field_validator('event_horizon_radius_km')
+    @classmethod
+    def validate_radius(cls, v: float, info: ValidationInfo) -> float:
+        # Calculate expected radius (rough approximation)
+        G = 6.674e-11  # gravitational constant
+        c = 3e8  # speed of light
+        mass_kg = info.data['mass_kg']
+        expected_radius_m = 2 * G * mass_kg / (c * c)
+        expected_radius_km = expected_radius_m / 1000
+        
+        # Allow 10% margin for error
+        if abs(v - expected_radius_km) / expected_radius_km > 0.1:
+            raise ValueError(
+                f'Event horizon radius {v} km differs from expected {expected_radius_km:.2f} km'
+            )
+        return v
+    
+    @field_validator('singularity_distance_km')
+    @classmethod
+    def validate_singularity(cls, v: Optional[float], info: ValidationInfo) -> Optional[float]:
+        if v is not None:
+            if v <= 0:
+                raise ValueError('Singularity distance must be positive')
+            if v >= info.data['event_horizon_radius_km']:
+                raise ValueError('Singularity must be inside event horizon')
+        return v
+
+try:
+    response = client.beta.chat.completions.parse(
+        model=MODEL_NAME,
+        messages=[
+            {
+                "role": "system",
+                "content": "Convert this black hole description into structured data:",
+            },
+            {"role": "user", "content": impossible_black_hole},
+        ],
+        response_format=BlackHole,
+    )
+except ValidationError as e:
+    print("\nBlack hole validation errors:")
+    print(e)
+
+# ...existing code...
