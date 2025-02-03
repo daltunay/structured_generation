@@ -754,25 +754,23 @@ print(repr(celestial_object))
 # - Scientific observation recording
 
 # %% [markdown]
-# ## Workshop Summary
-# We've covered:
-# 1. Converting unstructured text to JSON using LLMs
-# 2. Working with different LLM providers
-# 3. Using Pydantic for type-safe parsing
-# 4. Understanding and controlling token generation
-# 5. Using specialized libraries for structured generation
-#
-# **Next Steps:**
-# - Try combining different techniques
-# - Experiment with other data structures
-# - Test with different models and providers
-#
-#
-# %% [markdown]
 # ## 6. Adding Data Validation for LLM Outputs
 # 
-# When working with LLMs, their outputs can be unreliable. Let's look at some examples
-# and how to validate them.
+# One key challenge when working with LLMs is that they can:
+# 1. Generate physically impossible values
+# 2. Make mathematical errors
+# 3. Fail to maintain consistency between related values
+# 4. Hallucinate plausible-looking but incorrect data
+#
+# Even with perfect LLM output, the source data itself might contain errors or inconsistencies.
+# Therefore, we need robust validation to:
+# - Enforce physical constraints (e.g., positive mass, speed less than light)
+# - Check mathematical relationships (e.g., orbital parameters)
+# - Validate consistency between related values
+# - Flag impossible combinations
+#
+# Let's look at some examples using astronomical data, where physical constraints
+# are particularly important.
 
 # %%
 # First, let's create some questionable astronomical texts for the LLM to process
@@ -943,49 +941,40 @@ BH-123 is a unique black hole with:
 """
 
 # Your solution here:
-from typing import Optional
+
+G = 6.674e-11  # gravitational constant
+c = 3e8  # speed of light
 
 class BlackHole(BaseModel):
     name: str
     mass_kg: float
     event_horizon_radius_km: float
-    singularity_distance_km: Optional[float] = None
-    hawking_temperature_k: Optional[float] = None
+    singularity_distance_km: float | None = None
+    hawking_temperature_k: float | None = None
     
-    # Add your validators here
-    @field_validator('mass_kg')
-    @classmethod
-    def validate_mass(cls, v: float) -> float:
-        if v <= 0:
+    @model_validator(mode='after')
+    def validate_physics(self) -> Self:
+        if self.mass_kg <= 0:
             raise ValueError('Black hole mass must be positive')
-        return v
-    
-    @field_validator('event_horizon_radius_km')
-    @classmethod
-    def validate_radius(cls, v: float, info: ValidationInfo) -> float:
+        
         # Calculate expected radius (rough approximation)
-        G = 6.674e-11  # gravitational constant
-        c = 3e8  # speed of light
-        mass_kg = info.data['mass_kg']
-        expected_radius_m = 2 * G * mass_kg / (c * c)
+        expected_radius_m = 2 * G * self.mass_kg / (c * c)
         expected_radius_km = expected_radius_m / 1000
         
         # Allow 10% margin for error
-        if abs(v - expected_radius_km) / expected_radius_km > 0.1:
+        if abs(self.event_horizon_radius_km - expected_radius_km) / expected_radius_km > 0.1:
             raise ValueError(
-                f'Event horizon radius {v} km differs from expected {expected_radius_km:.2f} km'
+                f'Event horizon radius {self.event_horizon_radius_km} km differs '
+                f'from expected {expected_radius_km:.2f} km'
             )
-        return v
-    
-    @field_validator('singularity_distance_km')
-    @classmethod
-    def validate_singularity(cls, v: Optional[float], info: ValidationInfo) -> Optional[float]:
-        if v is not None:
-            if v <= 0:
+        
+        if self.singularity_distance_km is not None:
+            if self.singularity_distance_km <= 0:
                 raise ValueError('Singularity distance must be positive')
-            if v >= info.data['event_horizon_radius_km']:
+            if self.singularity_distance_km >= self.event_horizon_radius_km:
                 raise ValueError('Singularity must be inside event horizon')
-        return v
+        
+        return self
 
 try:
     response = client.beta.chat.completions.parse(
@@ -1003,4 +992,40 @@ except ValidationError as e:
     print("\nBlack hole validation errors:")
     print(e)
 
-# ...existing code...
+# %% [markdown]
+# ### Exercise 4.2: Testing with Valid Data
+# 
+# Now that we've seen how our validators catch impossible values, let's try them with
+# physically possible data. Create your own `possible_black_hole` text with realistic values.
+#
+# Some tips for realistic values:
+# - Stellar black holes typically have masses of 3-100 solar masses (1 solar mass ≈ 2e30 kg)
+# - The event horizon radius should follow r = 2GM/c²
+# - Any singularity distance should be > 0 but < event horizon radius
+# - Hawking temperature is inversely proportional to mass
+#
+# Try running your data through the validator:
+
+# %%
+possible_black_hole = """
+# Fill in your own realistic black hole description here
+"""
+
+try:
+    response = client.beta.chat.completions.parse(
+        model=MODEL_NAME,
+        messages=[
+            {
+                "role": "system",
+                "content": "Convert this black hole description into structured data:",
+            },
+            {"role": "user", "content": possible_black_hole},
+        ],
+        response_format=BlackHole,
+    )
+    print("Validation successful!")
+    print(response.choices[0].message.content)
+except ValidationError as e:
+    print("Validation failed:")
+    print(e)
+
