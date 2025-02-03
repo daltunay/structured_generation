@@ -1089,11 +1089,11 @@ except ValidationError as e:
 # %%
 # First, let's set up our vision model using Outlines
 import torch
-from transformers import LlavaForConditionalGeneration
+from transformers import LlavaNextForConditionalGeneration
 import outlines
 
 # Initialize our model
-model = outlines.models.transformers_vision("mistral-community/pixtral-12b", LlavaForConditionalGeneration, device_map="auto")
+model = outlines.models.transformers_vision("llava-hf/llava-v1.6-mistral-7b-hf", LlavaForConditionalGeneration)
 
 # %% [markdown]
 # ### Defining a Schema for Vision Output
@@ -1206,3 +1206,5 @@ image = img_from_url(image_url)
 # Generate structured output
 result = image_data_generator(pixtral_instruction, [image])
 print(result)
+
+# %%
