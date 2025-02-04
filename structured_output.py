@@ -1076,135 +1076,53 @@ except ValidationError as e:
     print(e)
 
 # %% [markdown]
-# ## 8. Advanced Vision Models with Structured Output
-# In our previous section, we used basic vision models with free-form text output.
-# Now, let's explore how to get more structured output using the Outlines library with vision models.
-#
-# Key benefits of structured vision output:
-# - Consistent format across different images
-# - Type-safe data that can be validated
-# - Easier to integrate into downstream applications
-# - Better control over the model's output format
+# ## 8. Simple Vision Models with Structured Output
+# Let's explore how to get structured output from vision models using Outlines.
 
 # %%
-# First, let's set up our vision model using Outlines
 import torch
 from transformers import LlavaNextForConditionalGeneration
 import outlines
 
 # Initialize our model
-model = outlines.models.transformers_vision("llava-hf/llava-v1.6-mistral-7b-hf", LlavaForConditionalGeneration)
-
-# %% [markdown]
-# ### Defining a Schema for Vision Output
-# When analyzing images, we often want to extract multiple types of information:
-# 1. Tags/labels that describe different aspects of the image
-# 2. A short caption for quick reference
-# 3. A detailed description for comprehensive understanding
-#
-# Let's define a schema that captures all these aspects:
+model = outlines.models.transformers_vision(
+    "llava-hf/llava-v1.6-mistral-7b-hf",
+    model_class=LlavaNextForConditionalGeneration
+)
 
 # %%
-from pydantic import BaseModel, Field, confloat, constr
-from pydantic.types import StringConstraints
-from typing_extensions import Annotated
-from enum import StrEnum
-
-
-class TagType(StrEnum):
-    """Categories for different types of image tags."""
-
-    ENTITY = "Entity"  # Objects, people, etc.
-    RELATIONSHIP = "Relationship"  # How entities interact
-    STYLE = "Style"  # Visual style elements
-    ATTRIBUTE = "Attribute"  # Properties of entities
-    COMPOSITION = "Composition"  # Image layout
-    CONTEXTUAL = "Contextual"  # Background info
-    TECHNICAL = "Technical"  # Camera/photo details
-    SEMANTIC = "Semantic"  # Meaning/symbolism
-
-
-class ImageTag(BaseModel):
-    """A single tag describing some aspect of an image."""
-
-    tag: Annotated[
-        constr(min_length=1, max_length=30),
-        Field(description="Descriptive keyword or phrase representing the tag."),
-    ]
-    category: TagType
-    confidence: Annotated[
-        confloat(le=1.0),
-        Field(
-            description=(
-                "Confidence score for the tag, between 0 (exclusive) and 1 (inclusive)."
-            )
-        ),
-    ]
-
+from pydantic import BaseModel
 
 class ImageData(BaseModel):
-    """Complete structured description of an image."""
-
-    tags_list: list[ImageTag] = Field(..., min_items=8, max_items=20)
-    short_caption: Annotated[str, StringConstraints(min_length=10, max_length=150)]
-    dense_caption: Annotated[str, StringConstraints(min_length=100, max_length=2048)]
-
+    caption: str
+    tags_list: list[str]
+    object_list: list[str]
+    is_photo: bool
 
 # Create our structured generator
 image_data_generator = outlines.generate.json(model, ImageData)
-
-# %% [markdown]
-# ### Creating a Detailed Prompt
-# The prompt is crucial for getting good structured output.
-# We need to:
-# 1. Clearly define the task
-# 2. Specify requirements for each tag category
-# 3. Provide examples of the expected format
-# 4. Give guidelines for caption generation
-
-# %%
-pixtral_instruction = """
-<s>[INST]
-<Task>You are a structured image analysis agent. Generate comprehensive tag list, caption, and dense caption for an image classification system.</Task>
-<TagCategories requirement="You should generate a minimum of 1 tag for each category." confidence="Confidence score for the tag, between 0 (exclusive) and 1 (inclusive).">
-- Entity : The content of the image, including the objects, people, and other elements.
-- Relationship : The relationships between the entities in the image.
-- Style : The style of the image, including the color, lighting, and other stylistic elements.
-- Attribute : The most important attributes of the entities and relationships in the image.
-- Composition : The composition of the image, including the arrangement of elements.
-- Contextual : The contextual elements of the image, including the background, foreground, and other elements.
-- Technical : The technical elements of the image, including the camera angle, lighting, and other technical details.
-- Semantic : The semantic elements of the image, including the meaning of the image, the symbols, and other semantic details.
-</TagCategories>
-<ShortCaption note="The short caption should be a concise single sentence caption of the image content with a maximum length of 100 characters.">
-<DenseCaption note="The dense caption should be a descriptive but grounded narrative paragraph incorporating elements from each tag category.">
-[IMG][/INST]
-""".strip()
-
-# %% [markdown]
-# ### Processing Images
-# Now we can process images and get structured output. Let's test it with some sample images:
 
 # %%
 from io import BytesIO
 from urllib.request import urlopen
 from PIL import Image
 
-
 def img_from_url(url: str) -> Image.Image:
     """Load an image from a URL and convert it to RGB format."""
     img_byte_stream = BytesIO(urlopen(url).read())
     return Image.open(img_byte_stream).convert("RGB")
 
-
 # Test with a famous image
-image_url = (
-    "https://upload.wikimedia.org/wikipedia/commons/9/98/Aldrin_Apollo_11_original.jpg"
-)
+image_url = "https://upload.wikimedia.org/wikipedia/commons/9/98/Aldrin_Apollo_11_original.jpg"
 image = img_from_url(image_url)
 
 # Generate structured output
-result = image_data_generator(pixtral_instruction, [image])
+result = image_data_generator(
+    "<image> detailed JSON metadata:",
+    [image]
+)
 print(result)
 
-# %%
+# %% [markdown]
+# ### Exercise: Testing with Different Images
+# Try running the structured generation with different types of images to see how the model performs.
