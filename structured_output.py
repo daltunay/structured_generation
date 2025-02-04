@@ -73,10 +73,12 @@ print(satellites_txt)
 # Let's try converting our unstructured text data into JSON using an LLM.
 # First, we'll set up our LLM client:
 
+import os
+
+from dotenv import load_dotenv
+
 # %%
 from openai import OpenAI
-import os
-from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -90,14 +92,13 @@ client = OpenAI(
 # Try to write a prompt that would convert the planets data into JSON format.
 # What challenges do you expect to face?
 
-# %% [markdown]
-# ### Solution
-
 # %%
+PROMPT = ...  # fill this in
+
 response = client.chat.completions.create(
     model="llama-3.1-8b-instant",
     messages=[
-        {"role": "system", "content": "Convert the following into a JSON format:"},
+        {"role": "system", "content": PROMPT},
         {"role": "user", "content": planets_txt},
     ],
 )
@@ -147,6 +148,15 @@ def test_prompt_reliability(prompt: str, n_trials: int = 10) -> float:
 
     return success
 
+
+# %% [markdown]
+# Let's test it with a basic prompt:
+
+# %%
+PROMPT = "Convert the following into a JSON format:"
+success = test_prompt_reliability(PROMPT, n_trials=1)
+
+print(f"Conversion successful: {success == 1}")
 
 # %% [markdown]
 # Try different prompts! Here are some ideas to start with:
@@ -299,22 +309,13 @@ print(response_content)
 
 # %% [markdown]
 # ### Exercise 3
-# Before looking at the solution, try to define a Pydantic model for the satellites data.
+# Try to define a Pydantic model for the satellites data.
 # What fields would you include?
-
-# %% [markdown]
-# ### Solution
-
 
 # %%
 class Satellite(BaseModel):
-    planet: str
     name: str
-    gm: float
-    radius: float
-    density: float
-    magnitude: float
-    albedo: float
+    # fill in the rest of the fields
 
 
 class SatelliteSystem(BaseModel):
@@ -417,7 +418,7 @@ response = client.chat.completions.create(
 tokens = [lp.token for lp in response.choices[0].logprobs.content[0].top_logprobs]
 probs = [10**lp.logprob for lp in response.choices[0].logprobs.content[0].top_logprobs]
 
-# Plot and print in one call
+# Plot and print the top token probabilities
 plot_token_probs(tokens, probs)
 
 # %% [markdown]
@@ -432,7 +433,7 @@ plot_token_probs(tokens, probs)
 
 MODEL_NAME = "openai-community/gpt2-xl"
 
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, device_map="auto")
@@ -568,6 +569,7 @@ output_token = outputs[0, prompt_tokens_length:]
 output_decoded = tokenizer.decode(output_token, skip_special_tokens=True)
 print(output_decoded)
 
+
 # %% [markdown]
 # ### Exercise 4
 # Now that you've seen how the YesNoLogitsProcessor works, how would you modify it for different binary choices?
@@ -582,6 +584,38 @@ print(output_decoded)
 # - How would you change the token IDs being used?
 # - Would you need to modify the probability comparison?
 # - What other modifications might be needed for your specific use case?
+
+# %%
+class MyLogitsProcessor(LogitsProcessor):
+    def __init__(self, tokenizer, initial_length):
+        self.tokenizer = tokenizer
+        self.initial_length = initial_length
+
+    def __call__(
+        self, input_ids: torch.LongTensor, scores: torch.FloatTensor
+    ) -> torch.FloatTensor:
+        # Your code here
+        return scores
+
+
+# %%
+MY_PROMPT = "..."  # Fill in your prompt here
+
+# Run the constrained generation
+inputs = tokenizer(MY_PROMPT, return_tensors="pt").to(model.device)
+prompt_tokens_length = len(inputs[0])
+
+logits_processor = YesNoLogitsProcessor(tokenizer, prompt_tokens_length)
+outputs = model.generate(
+    **inputs,
+    pad_token_id=tokenizer.eos_token_id,
+    logits_processor=[logits_processor],
+    max_length=prompt_tokens_length + 1,  # generate 1 token only
+)
+
+output_token = outputs[0, prompt_tokens_length:]
+output_decoded = tokenizer.decode(output_token, skip_special_tokens=True)
+print(output_decoded)
 
 # %% [markdown]
 # ## 7. Structured Generation with Outlines
@@ -625,7 +659,6 @@ print(f"List-based choice: {answer}")
 # - Ensure type safety
 # - Make choices self-documenting
 # - Group related options
-# - Enable IDE autocompletion
 
 # %%
 from enum import Enum
@@ -661,6 +694,7 @@ print(f"Enum-based choice: {answer}")
 
 # %%
 from enum import Enum
+
 from pydantic import BaseModel
 
 
@@ -761,7 +795,8 @@ print(repr(celestial_object))
 
 
 # %%
-class MyModel(BaseModel): ...
+class MyModel(BaseModel):
+    # Fill in the fields for your custom model
 
 
 # Create a generator for this complex structure
@@ -769,7 +804,7 @@ class MyModel(BaseModel): ...
 generator = outlines.generate.json(outlines_model, MyModel)
 
 context = """
-...
+... # Fill in the context here, using get_text() or any other method
 """
 
 prompt = f"""
@@ -852,7 +887,7 @@ print(response.choices[0].message.content)
 # %%
 # Now let's add validators
 
-from pydantic import ValidationError, field_validator, model_validator, ValidationInfo
+from pydantic import ValidationError, ValidationInfo, field_validator, model_validator
 
 
 class ValidatedStar(BaseModel):
@@ -981,8 +1016,6 @@ BH-123 is a unique black hole with:
 - Hawking temperature: -290 K (negative temperature!)
 """
 
-# Your solution here:
-
 G = 6.674e-11  # gravitational constant
 c = 3e8  # speed of light
 
@@ -995,31 +1028,24 @@ class BlackHole(BaseModel):
     hawking_temperature_k: float | None = None
 
     @model_validator(mode="after")
-    def validate_physics(self) -> Self:
-        if self.mass_kg <= 0:
-            raise ValueError("Black hole mass must be positive")
-
-        # Calculate expected radius (rough approximation)
-        expected_radius_m = 2 * G * self.mass_kg / (c * c)
-        expected_radius_km = expected_radius_m / 1000
-
-        # Allow 10% margin for error
-        if (
-            abs(self.event_horizon_radius_km - expected_radius_km) / expected_radius_km
-            > 0.1
-        ):
+    def validate_event_horizon(self) -> Self:
+        # calculate expected radius
+        expected_radius =  # fill in the formula here
+        if # fill in the condition here
             raise ValueError(
-                f"Event horizon radius {self.event_horizon_radius_km} km differs "
-                f"from expected {expected_radius_km:.2f} km"
+                f"..."  # fill in the error message here
             )
-
-        if self.singularity_distance_km is not None:
-            if self.singularity_distance_km <= 0:
-                raise ValueError("Singularity distance must be positive")
-            if self.singularity_distance_km >= self.event_horizon_radius_km:
-                raise ValueError("Singularity must be inside event horizon")
-
         return self
+    
+    @model_validator(mode="after")
+    def validate_singularity(self) -> Self:
+        if self.singularity_distance_km is not None:
+            # fill code here
+        return self
+    
+    @model_validator(mode="after")
+    def validate_temperature(self) -> Self:
+        # fill code here
 
 
 try:
@@ -1079,10 +1105,11 @@ except ValidationError as e:
 # ## 8. Simple Vision Models with Structured Output
 # Let's explore how to get structured output from vision models using Outlines.
 
+import outlines
+
 # %%
 import torch
 from transformers import LlavaNextForConditionalGeneration
-import outlines
 
 # Initialize our model
 model = outlines.models.transformers_vision(
@@ -1092,6 +1119,7 @@ model = outlines.models.transformers_vision(
 
 # %%
 from pydantic import BaseModel
+
 
 class ImageData(BaseModel):
     caption: str
@@ -1105,7 +1133,9 @@ image_data_generator = outlines.generate.json(model, ImageData)
 # %%
 from io import BytesIO
 from urllib.request import urlopen
+
 from PIL import Image
+
 
 def img_from_url(url: str) -> Image.Image:
     """Load an image from a URL and convert it to RGB format."""
@@ -1115,6 +1145,9 @@ def img_from_url(url: str) -> Image.Image:
 # Test with a famous image
 image_url = "https://upload.wikimedia.org/wikipedia/commons/9/98/Aldrin_Apollo_11_original.jpg"
 image = img_from_url(image_url)
+
+# Lower image quality for faster processing
+image = image.resize((256, 256))
 
 # Generate structured output
 result = image_data_generator(
